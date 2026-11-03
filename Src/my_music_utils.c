@@ -3,7 +3,7 @@
 #include "my_music_utils.h"
 
 // To prevent time-consuming calculations later, I'll store the
-// frequencies for the octave starting at middle C (midi note 60).
+// frequencies for the octave starting at middle C (MIDI note 60).
 // All other octaves are easy to calculate from here.
 const float scaleFrequencies[] = {261.63, 277.18, 293.67, 311.13,
 		329.63, 349.23, 369.99, 392.00,
@@ -34,8 +34,8 @@ const uint8_t chordNotes[19][6] = {
 		{0, 12, 0, 12, 0, 12}  // Tonic only
 };
 
-// This function provides the frequency of any note asked.  It takes in the
-// MIDI code of that note:
+// This function provides the frequency of any note asked.
+// The input is the MIDI code of that note:
 float getFreqOfMidiNote(uint8_t midiNote) {
 	float factor = 1.0;
 	while (midiNote < 60) {

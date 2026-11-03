@@ -12,7 +12,7 @@ float sineBuffer[SINE_BUF_SIZE];
 float mainEnvData[] = {1000.0, 1000.0, 0.8f, 88200.0, 441000.0};
 float modEnvData[] = {1000.0, 1000.0, 0.8f, 22050.0, 176400.0};
 float modulationFactor = 0.40;
-float modulationFreqMultiplier = 0.25;
+float modulationFreqMultiplier = 2.0;
 uint16_t nextFMToAdd = 0;
 struct FM_noteType FM_notes[MAX_FM_NOTES];
 
@@ -161,7 +161,7 @@ void addFMsamples(uint16_t *buffer, uint32_t start, uint32_t end) {
 				FM_notes[thisIndex].lastMainEnv = newEnvMain;
 
 				// Can now start to fill up the buffer for this note:
-				for (int u = start; u < end; u++) {
+				for (int u = start; u < end; u += 2) {
 
 					float modPhaseOffset = FM_notes[thisIndex].modPhaseOffset;
 					float modSine = sineBuffer[((int16_t) modPhaseOffset) & SINE_BUF_SIZE_MINUS_ONE] * (startEnvMod + (u - start) * deltaEnvMod);

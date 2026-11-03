@@ -116,7 +116,7 @@ void addKSsamples(uint16_t *buffer, uint32_t start, uint32_t end) {
 
 		// Then for any active notes, add their contribution to the audio buffer:
 		if (KS_notes[thisIndex].status == Active) {
-			for (int u = start; u < end; u++) {
+			for (int u = start; u < end; u += 2) {
 				uint16_t currentOffset = (uint16_t)KS_notes[thisIndex].mainPhaseOffset;
 				currentOffset = currentOffset & (KS_BUF_SIZE - 1);
 				buffer[u] += (int16_t)KS_Buffer[currentOffset];
