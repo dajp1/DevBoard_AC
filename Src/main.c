@@ -212,8 +212,9 @@ int main(void)
   fillSineArray();
   printf("Sine buffer filled.\n");
 
-  // Initialise the KS buffers (fills them with zeros):
+  // Initialise the KS buffers (fills them with zeros) and set default KS parameters:
   initKSBuffersAndNotes();
+  SetKSDampingFactor(0.4, 2000);
 
   // Start reception from the UART:
   HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART_rxBuffer, UART_MAX_SIZE);
@@ -231,6 +232,7 @@ int main(void)
   // Will need to store these in case the bytes make use of the zero = no change option.
   uint8_t lastBassNote = 1;   // Set to default of 'C'
   uint8_t lastChordRoot = 1;  // Set to default of 'C'
+  uint8_t currentTempo = 120; // Set to default of 120 bpm
 
   while (1)
   {
@@ -242,7 +244,7 @@ int main(void)
 		// The prints are effectively commented out, as the printf() was taking so long
 		// it was causing transient glitches in the audio every time something needed to
 		// be printed out.
-		if (rxStuffHereFlag > 0 && false) {
+		if (rxStuffHereFlag > 0 || false) {
 			printf("UART data received: length %d: ", (int)rxStuffHereFlag);
 			for (int u = 0; u < rxStuffHereFlag; u++) {
 				printf("0x%x ", UART_rxBuffer[u]);
@@ -253,15 +255,26 @@ int main(void)
 		// Reset the flag ready for the next time:
 		rxStuffHereFlag = 0;
 
-		// Parse the message received to see if it is a start of bar message, and if so,
-		// extract the current chord root note and bass note:
-		if (UART_rxBuffer[0] == 0xFB) {
-			uint8_t bassNote = UART_rxBuffer[8] & 0xF;
-			uint8_t chordRoot = UART_rxBuffer[8] >> 4;
-			uint8_t chordType = UART_rxBuffer[9];
+		// Parse the message received to see if it is a start of bar message, or
+		// a bar update message, and if so, extract the current chord root note
+		// and bass note:
+		if (UART_rxBuffer[1] == 0x00 || UART_rxBuffer[1] == 0x02) {
 
-			// Quick sanity check: both should be in the range 1 (C) to 12 (B), and zero
-			// means no change:
+			uint8_t bassNote, chordRoot, chordType;
+
+			if (UART_rxBuffer[1] == 0x00) {
+				bassNote = UART_rxBuffer[8] & 0xF;
+				chordRoot = UART_rxBuffer[8] >> 4;
+				chordType = UART_rxBuffer[9];
+			}
+			else {
+				bassNote = UART_rxBuffer[3] & 0xF;
+				chordRoot = UART_rxBuffer[3] >> 4;
+				chordType = UART_rxBuffer[4];
+			}
+
+			// Quick sanity check: both should be in the range 1 (C) to 12 (B),
+			// and zero means no change:
 			if (bassNote > 12) bassNote = (bassNote - 1) % 12 + 1;
 			else if (bassNote == 0 && lastBassNote > 0) bassNote = lastBassNote;
 			if (bassNote != 0) lastBassNote = bassNote;
@@ -275,12 +288,13 @@ int main(void)
 			// 48 for the C below middle-C, so to convert to MIDI notes, add 47.
 			float bassFrequency = getFreqOfMidiNote(bassNote + 47);
 
-			// From the tempo, work out the time in milliseconds of one beat:
-			uint8_t tempo_BPM = UART_rxBuffer[4];
-			uint16_t milliSecondsInOneBeat = 60000 / tempo_BPM;
+			// From the most recent tempo, work out the time in milliseconds of one beat:
+			if (UART_rxBuffer[1] == 0x00) currentTempo = UART_rxBuffer[4];
+			uint16_t milliSecondsInOneBeat = 60000 / currentTempo;
 
 			// Then add to the queue an FM note starting now for the bass frequency:
 			addNewFMNote(timeNow, bassFrequency);
+			addNewFMNote(timeNow + milliSecondsInOneBeat / 4, bassFrequency * 0.5);
 
 			// Add a chord arpeggio for the KS notes going up and down the chord.
 			uint8_t chordFreqs[5] = {60, 60, 60, 60};

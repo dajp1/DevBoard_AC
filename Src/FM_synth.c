@@ -2,6 +2,7 @@
 //  Version 0.0.  DAJP - 24th Oct 2026.
 #include "FM_synth.h"
 #include "stm32g4xx_hal.h"
+#include "main.h"
 
 // The routines will need to know the sample rate:
 static uint32_t sampleRate = 44100;
@@ -77,28 +78,28 @@ void addNewFMNote(uint32_t when_ms, float frequency) {
 // The envelope array has terms [attack time; delay time; sustain level;
 // sustain time; release time], with the sustain level between zero and one
 // and the times in ms.
-float getEnvelope(float *modEnvData, uint32_t samplesSinceStart) {
+float getEnvelope(float *envData, uint32_t samplesSinceStart) {
 	float val = 0;
 
-	if (samplesSinceStart < modEnvData[0]) {
+	if (samplesSinceStart < envData[0]) {
 		// In the attack phase:
-		val = (float)samplesSinceStart / modEnvData[0];
+		val = (float)samplesSinceStart / envData[0];
 	}
-	else if (samplesSinceStart < modEnvData[1]) {
+	else if (samplesSinceStart < envData[1]) {
 		// In the decay phase:
-		float samplesIntoDecay = samplesSinceStart - modEnvData[0];
-		float totalDecaySamples = modEnvData[1] - modEnvData[0];
-		val = 1 - (1 - modEnvData[2]) * samplesIntoDecay / totalDecaySamples;
+		float samplesIntoDecay = samplesSinceStart - envData[0];
+		float totalDecaySamples = envData[1] - envData[0];
+		val = 1 - (1 - envData[2]) * samplesIntoDecay / totalDecaySamples;
 	}
-	else if (samplesSinceStart < modEnvData[3]) {
+	else if (samplesSinceStart < envData[3]) {
 		// In the sustain phase:
-		val = modEnvData[2];
+		val = envData[2];
 	}
-	else if (samplesSinceStart < modEnvData[4]) {
+	else if (samplesSinceStart < envData[4]) {
 		// In the release phase:
-		float samplesIntoRelease = samplesSinceStart - modEnvData[3];
-		float totalReleaseSamples = modEnvData[4] - modEnvData[3];
-		val = modEnvData[2] * (1 - samplesIntoRelease / totalReleaseSamples);
+		float samplesIntoRelease = samplesSinceStart - envData[3];
+		float totalReleaseSamples = envData[4] - envData[3];
+		val = envData[2] * (1 - samplesIntoRelease / totalReleaseSamples);
 	}
 
 	return val < 0.0 ? 0.0 : val;
@@ -106,98 +107,77 @@ float getEnvelope(float *modEnvData, uint32_t samplesSinceStart) {
 
 // Add the next lot of FM contributions to the audio buffer:
 void addFMsamples(uint16_t *buffer, uint32_t start, uint32_t end) {
-	// First, check to see which notes I should be playing.  For now,
-	// this means finding the note with a start time closest to the
-	// current time, and working backwards adding up the contributions
-	// of up to four notes that are still going.
+	// I'll simplify this: just look through all possible notes and 
+	// play any that are active.
 
 	uint32_t currentTime = HAL_GetTick();
-	int16_t startHere = -1;
-	uint32_t minTimePlaying = 0xFFFFFFFF;
-	for (int q = 0; q < MAX_FM_NOTES; q++) {
-		uint32_t startTimeMS = FM_notes[q].startTimeInMilliSeconds;
-		if (currentTime > startTimeMS && currentTime - startTimeMS < minTimePlaying) {
-			minTimePlaying = currentTime - startTimeMS;
-			startHere = q;
+	for (int thisIndex = 0; thisIndex < MAX_FM_NOTES; thisIndex++) {
+
+		// If one of these notes is due to start, but is not currently playing,
+		// then start it up:
+		if (FM_notes[thisIndex].status == Pending && FM_notes[thisIndex].startTimeInMilliSeconds < currentTime) {
+			FM_notes[thisIndex].status = Active;
 		}
-	}
 
-	// If startHere is not -1, then might have found at least one active
-	// note.  I'll try to play this one:
-	if (startHere != -1) {
-		int16_t thisIndex = startHere;
+		// Then for all active notes, add their contribution to the audio buffer:
+		if (FM_notes[thisIndex].status == Active) {
 
-		for (int q = 0; q < 4; q++) {
+			// To save time, the envelopes will only be calculated once every
+			// buffer update time, and linearly interpolated otherwise.  This should
+			// be enough for most cases, and much faster than recalculating the
+			// envelopes every sample:
+			FM_notes[thisIndex].samplesSinceStart += end - start;
+			float newEnvMod = getEnvelope(modEnvData, FM_notes[thisIndex].samplesSinceStart);
+			float newEnvMain = getEnvelope(mainEnvData, FM_notes[thisIndex].samplesSinceStart);
 
-			// If one of these notes is due to start, but not currently playing,
-			// then start it up:
-			if (FM_notes[thisIndex].status == Pending) {
-				FM_notes[thisIndex].status = Active;
-			}
+			// If the main envelope returns zero, then assume the release period
+			// is over, and set the note to be off.
+			if (newEnvMain == 0.0) FM_notes[thisIndex].status = Off;
 
-			// Then for all active notes, add their contribution to the audio buffer:
-			if (FM_notes[thisIndex].status == Active) {
+			// Now work out the envelope factors for the first element in the buffer,
+			// and the factor by which it changes per element:
+			float startEnvMod = FM_notes[thisIndex].lastModEnv;
+			float deltaEnvMod = (newEnvMod - startEnvMod) / (float)(end - start);
+			FM_notes[thisIndex].lastModEnv = newEnvMod;
 
-				// To save time, the envelopes will only be calculated once every
-				// buffer update time, and linearly interpolated otherwise.  This should
-				// be enough for most cases, and much faster than recalculating the
-				// envelopes every sample:
-				FM_notes[thisIndex].samplesSinceStart += end - start;
-				float newEnvMod = getEnvelope(modEnvData, FM_notes[thisIndex].samplesSinceStart);
-				float newEnvMain = getEnvelope(mainEnvData, FM_notes[thisIndex].samplesSinceStart);
+			float startEnvMain = FM_notes[thisIndex].lastMainEnv;
+			float deltaEnvMain = (newEnvMain - startEnvMain) / (float)(end - start);
+			FM_notes[thisIndex].lastMainEnv = newEnvMain;
 
-				// If the main envelope returns zero, then assume the release period
-				// is over, and set the note to be off.
-				if (newEnvMain == 0.0) FM_notes[thisIndex].status = Off;
+			// Can now start to fill up the buffer for this note:
+			for (int u = start; u < end; u += 2) {
 
-				// Now work out the envelope factors for the first element in the buffer,
-				// and the factor by which it changes per element:
-				float startEnvMod = FM_notes[thisIndex].lastModEnv;
-				float deltaEnvMod = (newEnvMod - startEnvMod) / (float)(end - start);
-				FM_notes[thisIndex].lastModEnv = newEnvMod;
+				float modPhaseOffset = FM_notes[thisIndex].modPhaseOffset;
+				float modSine = sineBuffer[((int16_t) modPhaseOffset) & SINE_BUF_SIZE_MINUS_ONE] * (startEnvMod + (u - start) * deltaEnvMod);
+				float phaseMod = modulationFactor * modSine * SINE_BUF_SIZE;
 
-				float startEnvMain = FM_notes[thisIndex].lastMainEnv;
-				float deltaEnvMain = (newEnvMain - startEnvMain) / (float)(end - start);
-				FM_notes[thisIndex].lastMainEnv = newEnvMain;
+				float mainPhaseOffset = FM_notes[thisIndex].mainPhaseOffset;
+				mainPhaseOffset += phaseMod;
 
-				// Can now start to fill up the buffer for this note:
-				for (int u = start; u < end; u += 2) {
+				// If is possible that this mainPhaseOffset is now outside the range of the sine
+				// buffer, but converting to an integer and ANDing with the size of the buffer
+				// minus one should get it back to a positive number in the right range provided
+				// that SINE_BUF_SIZE is a power of two.
+				float sample = sineBuffer[((int16_t) mainPhaseOffset) & SINE_BUF_SIZE_MINUS_ONE];
 
-					float modPhaseOffset = FM_notes[thisIndex].modPhaseOffset;
-					float modSine = sineBuffer[((int16_t) modPhaseOffset) & SINE_BUF_SIZE_MINUS_ONE] * (startEnvMod + (u - start) * deltaEnvMod);
-					float phaseMod = modulationFactor * modSine * SINE_BUF_SIZE;
+				// Then apply the envelope on the main oscillator, and scale:
+				sample *= startEnvMain + (u - start) * deltaEnvMain;
+				sample *= 1000; // Scale up from -1 to +1, with some head room for multiple notes
 
-					float mainPhaseOffset = FM_notes[thisIndex].mainPhaseOffset;
-					mainPhaseOffset += phaseMod;
+				buffer[u] += sample;
+				buffer[u + 1] += sample;
 
-					// If is possible that this mainPhaseOffset is now outside the range of the sine
-					// buffer, but converting to an integer and ANDing with the size of the buffer
-					// minus one should get it back to a positive number in the right range provided
-					// that SINE_BUF_SIZE is a power of two.
-					float sample = sineBuffer[((int16_t) mainPhaseOffset) & SINE_BUF_SIZE_MINUS_ONE];
-
-					// Then apply the envelope on the main oscillator, and scale:
-					sample *= startEnvMain + (u - start) * deltaEnvMain;
-					sample *= 1000; // Scale up from -1 to +1, with some head room for multiple notes
-
-					buffer[u] += sample;
-					buffer[u + 1] += sample;
-
-					// Can't do the "& SINE_BUF_SIZE_MINUS_ONE" trick here, since these are floats,
-					// but need to ensure that the phase offsets remain between zero and the SINE_BUF_SIZE.
-					FM_notes[thisIndex].mainPhaseOffset += FM_notes[thisIndex].mainPhaseStep;
-					if (FM_notes[thisIndex].mainPhaseOffset >= SINE_BUF_SIZE) {
-						FM_notes[thisIndex].mainPhaseOffset -= SINE_BUF_SIZE;
-					}
-					FM_notes[thisIndex].modPhaseOffset += FM_notes[thisIndex].modPhaseStep;
-					if (FM_notes[thisIndex].modPhaseOffset >= SINE_BUF_SIZE) {
-						FM_notes[thisIndex].modPhaseOffset -= SINE_BUF_SIZE;
-					}
+				// Can't do the "& SINE_BUF_SIZE_MINUS_ONE" trick here, since these are floats,
+				// but need to ensure that the phase offsets remain between zero and the SINE_BUF_SIZE.
+				FM_notes[thisIndex].mainPhaseOffset += FM_notes[thisIndex].mainPhaseStep;
+				if (FM_notes[thisIndex].mainPhaseOffset >= SINE_BUF_SIZE) {
+					FM_notes[thisIndex].mainPhaseOffset -= SINE_BUF_SIZE;
+				}
+				FM_notes[thisIndex].modPhaseOffset += FM_notes[thisIndex].modPhaseStep;
+				if (FM_notes[thisIndex].modPhaseOffset >= SINE_BUF_SIZE) {
+					FM_notes[thisIndex].modPhaseOffset -= SINE_BUF_SIZE;
 				}
 			}
-
-			// Move back through the queue to the next index:
-			thisIndex--; if (thisIndex < 0) thisIndex = MAX_FM_NOTES - 1;
 		}
 	}
 }

@@ -46,7 +46,7 @@ void initKSBuffersAndNotes() {
 	}
 }
 
-// Fill up the KS buffer with a square wave shape that will eventually
+// Fill up the KS buffer with a square-wave shape that will eventually
 // average out to zero:
 void FillKSBuffer(float *buf, float amp) {
 	uint16_t loop = 0;
@@ -69,10 +69,11 @@ void addNewKSNote(uint32_t when_ms, float frequency, float amplitude) {
 	// long as MAX_KS_NOTES is a power of two.  Work out the
 	// next buffer number, and turn off any note currently
 	// using it, then assign the buffer to the new note:
-	uint8_t bufferNumber = nextIndexNumber & 0x3;
+	uint8_t bufferNumber = nextIndexNumber % NUM_KS_BUFFERS;
 	for (int loop = 0; loop < MAX_KS_NOTES; loop++) {
-		if (KS_notes[loop].KSBufferNumber == bufferNumber && KS_notes[loop].status == Active)
+		if (KS_notes[loop].KSBufferNumber == bufferNumber && KS_notes[loop].status == Active) {
 			KS_notes[loop].status = Off;
+		}
 	}
 	KS_notes[nextIndexNumber].KSBufferNumber = nextIndexNumber % NUM_KS_BUFFERS;
 

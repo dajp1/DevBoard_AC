@@ -40,7 +40,7 @@ void setSampleRateKS(uint32_t newRate);
 void initKSBuffersAndNotes();
 void addNewKSNote(uint32_t when, float frequency, float amplitude);
 void addKSsamples(uint16_t *buffer, uint32_t start, uint32_t end);
-void SetKSDampingFactors(float filterFactor, float decayFactor);
+void SetKSDampingFactor(float filterFactor, float decayFactor);
 
 #endif /* __KS_SYNTH_H */
 
