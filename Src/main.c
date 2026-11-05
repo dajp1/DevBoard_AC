@@ -244,7 +244,7 @@ int main(void)
 		// The prints are effectively commented out, as the printf() was taking so long
 		// it was causing transient glitches in the audio every time something needed to
 		// be printed out.
-		if (rxStuffHereFlag > 0 || false) {
+		if (rxStuffHereFlag > 0 && false) {
 			printf("UART data received: length %d: ", (int)rxStuffHereFlag);
 			for (int u = 0; u < rxStuffHereFlag; u++) {
 				printf("0x%x ", UART_rxBuffer[u]);
